@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -68,8 +69,20 @@ type anthropicResponse struct {
 	} `json:"content"`
 }
 
+var codeBlockRegex = regexp.MustCompile("^```(?:\\w+)?\\s*\\n?([\\s\\S]*?)```\\s*$")
+
+// stripMarkdownCodeBlock removes markdown code block backticks if present
+func stripMarkdownCodeBlock(text string) string {
+	text = strings.TrimSpace(text)
+	if matches := codeBlockRegex.FindStringSubmatch(text); len(matches) > 1 {
+		return matches[1]
+	}
+	return text
+}
+
 func (p *AnthropicProvider) Completion(ctx context.Context, req CompletionRequest, filepath, languageID string, numSuggestions int) ([]string, error) {
 	systemPrompt := BuildCompletionSystemPrompt(languageID)
+	p.logger.Log("DEBUG [Anthropic Completion]: System prompt:", systemPrompt)
 	userPrompt := BuildCompletionUserPrompt(filepath, req.ContentBefore, req.ContentAfter)
 
 	temperature := 0.0
@@ -80,6 +93,7 @@ func (p *AnthropicProvider) Completion(ctx context.Context, req CompletionReques
 
 	results := make([]string, 0, numSuggestions)
 
+	p.logger.Log("DEBUG [Anthropic Completion]: Sending request for", numSuggestions, "suggestions")
 	for i := 0; i < numSuggestions; i++ {
 		apiReq := anthropicRequest{
 			Model:     p.model,
@@ -98,8 +112,10 @@ func (p *AnthropicProvider) Completion(ctx context.Context, req CompletionReques
 		}
 
 		resp, err := p.doRequest(ctx, "/v1/messages", apiReq)
+		p.logger.Log("DEBUG [Anthropic Completion]: Raw response:", string(resp))
 
 		if err != nil {
+			p.logger.Log("DEBUG [Anthropic Completion]: Request error:", err.Error())
 			if len(results) > 0 {
 				break
 			}
@@ -109,15 +125,20 @@ func (p *AnthropicProvider) Completion(ctx context.Context, req CompletionReques
 		var apiResp anthropicResponse
 
 		if err := json.Unmarshal(resp, &apiResp); err != nil {
+			p.logger.Log("DEBUG [Anthropic Completion]: Error parsing response:", err.Error())
 			if len(results) > 0 {
 				break
 			}
 			return nil, fmt.Errorf("parse response: %w", err)
 		}
+		p.logger.Log("DEBUG [Anthropic Completion]: Raw parsed response:", apiResp)
 
 		for _, content := range apiResp.Content {
 			if content.Type == "text" && content.Text != "" {
-				results = append(results, content.Text)
+				p.logger.Log("DEBUG [Anthropic Completion]: Extracted text:", content.Text)
+
+				cleanedText := stripMarkdownCodeBlock(content.Text)
+				results = append(results, cleanedText)
 			}
 		}
 	}
@@ -194,6 +215,7 @@ func (p *AnthropicProvider) doRequest(ctx context.Context, endpoint string, body
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.apiKey)
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := http.DefaultClient.Do(req)

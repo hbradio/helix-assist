@@ -11,6 +11,7 @@ Rules:
 - Do NOT add explanations, comments, or markdown formatting
 - Do NOT repeat existing code
 - Do NOT include comments
+- Do NOT wrap code in triple backticks or any other delimiters
 - Generate syntactically correct %s code that fits seamlessly between the before and after content
 
 Context awareness:
@@ -37,7 +38,7 @@ Code before cursor:
 Code after cursor (DO NOT duplicate or close delimiters that already exist here):
 %s
 
-Complete the code at the <CURSOR> position. The completion must fit seamlessly between the before and after sections.`, filepath, contentBefore, contentAfter)
+Complete the code at the <CURSOR> position. The completion must fit seamlessly between the before and after sections. DO NOT include triple-backticks or any other markers around the code.`, filepath, contentBefore, contentAfter)
 }
 
 func BuildChatSystemPrompt(languageID string) string {
